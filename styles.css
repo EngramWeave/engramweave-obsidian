@@ -1,0 +1,16 @@
+.engramweave-review { padding: 14px; }
+.engramweave-review h2 { font-size: 1.2em; overflow-wrap: anywhere; }
+.engramweave-review .ew-section { border-top: 1px solid var(--background-modifier-border); margin-top: 16px; padding-top: 10px; }
+.engramweave-review h3 { font-size: 1em; margin: 8px 0; }
+.engramweave-review .ew-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.engramweave-review button { margin: 4px 4px 4px 0; white-space: normal; max-width: 100%; }
+.engramweave-review .ew-muted { color: var(--text-muted); font-size: .9em; }
+.engramweave-review .ew-error, .ew-error { color: var(--text-error); overflow-wrap: anywhere; }
+.engramweave-review .ew-warning { color: var(--text-warning); }
+.engramweave-review .ew-success { color: var(--text-success); }
+.engramweave-review .ew-feedback:empty { display: none; }
+.engramweave-review .ew-feedback { position: sticky; top: 0; background: var(--background-secondary); padding: 8px; z-index: 1; overflow-wrap: anywhere; }
+.engramweave-review .ew-markdown { overflow-wrap: anywhere; }
+.engramweave-review details { margin: 8px 0; }
+.engramweave-review summary { cursor: pointer; font-weight: 600; }
+.ew-target-path { display: block; overflow-wrap: anywhere; white-space: normal; padding: 8px; }

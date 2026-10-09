@@ -1,0 +1,9 @@
+{
+  "id": "engramweave",
+  "name": "EngramWeave",
+  "version": "0.1.0",
+  "minAppVersion": "1.6.0",
+  "description": "Review Drafts with Source context and AI analysis, then publish approved Knowledge through Core.",
+  "author": "EngramWeave",
+  "isDesktopOnly": true
+}
