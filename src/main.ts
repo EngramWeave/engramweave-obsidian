@@ -1,13 +1,15 @@
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { FileSystemAdapter, ItemView, MarkdownRenderer, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, type WorkspaceLeaf } from 'obsidian';
 import { requestUrl } from 'obsidian';
-import type { AnalysisSettings, AnalyzerJob, CompilerJob, Job, DraftReview, Document, Status, ReviewResult, RelationResult, PublishDraftRequest } from '@engramweave/contracts';
+import type { AnalysisSettings, AnalyzerJob, CompilerJob, Job, DraftReview, Document, Status, ReviewResult, RelationResult, PublishDraftRequest, ProcessingRound, RecompileRequest } from '@engramweave/contracts';
 import { CoreClient, readConnection } from './connection';
 import { finished, knowledgeFilename, publicationRequest, Workflow } from './workflow';
 
 const VIEW = 'engramweave-review';
 interface Settings { config_path: string }
-type Result = { job: AnalyzerJob; stale: boolean; stale_reasons: string[]; review: ReviewResult | null; relation: RelationResult | null };
+type Result = { job: AnalyzerJob; stale: boolean; stale_reasons: string[]; review: ReviewResult | null; relation: RelationResult | null;
+  record?: { review: { evidence: { items: unknown[]; diagnostics: { message?: string }[] } }; relation: { evidence: { items: unknown[]; diagnostics: { message?: string }[] } } } };
 const message = (error: unknown) => error instanceof Error ? error.message : 'EngramWeave operation failed';
 
 export default class EngramWeavePlugin extends Plugin {
@@ -163,9 +165,9 @@ class ReviewView extends ItemView {
     const actions = this.section('Knowledge Compiler');
     const status = await this.plugin.client.request<Status>('/v1/status');
     if (this.plugin.focusedPath !== source.path) return;
-    const active = status.active_job;
+    const active = status.processing_round ?? status.active_job;
     if (active) {
-      actions.createEl('p', { text: `Core · ${active.kind} · ${active.status}`, cls: 'ew-muted' });
+      actions.createEl('p', { text: `Core · ${'kind' in active ? active.kind : 'Processing round'} · ${active.status}`, cls: 'ew-muted' });
       this.pollDisplay();
     }
     if (source.index_stale) {
@@ -177,20 +179,17 @@ class ReviewView extends ItemView {
         if (job.status !== 'succeeded') throw new Error(job.error?.message ?? `Registration ${job.status}`);
       }, Boolean(active));
     }
-    actions.createEl('p', { text: '明确执行 Compiler，再运行 Draft Analyzer。Capture、普通编辑和启动不会自动执行。', cls: 'ew-muted' });
+    actions.createEl('p', { text: 'Core 完成登记、Compiler 和两项 Analyzer；关闭侧边栏不会截断轮次。只有显式执行或已启用的计划调用模型。', cls: 'ew-muted' });
     this.button(actions, 'Run Knowledge Compiler', async () => {
       const sourcePath = source.path; const profile = this.profileId;
       await this.plugin.flushEditors();
       const fresh = await this.plugin.workflow.source(sourcePath);
-      const job = await this.plugin.workflow.compile(fresh);
-      const result = await this.waitJob<CompilerJob>(job.id);
-      if (result.status !== 'succeeded' || !result.draft_path) throw new Error(result.error?.message ?? `Compiler ${result.status}`);
-      const review = await this.plugin.workflow.review(result.draft_path);
-      const analysis = await this.plugin.workflow.analyze(review, profile);
-      const analyzed = await this.waitJob<AnalyzerJob>(analysis.id);
-      if (analyzed.status !== 'succeeded') new Notice('Draft 已保留；Analyzer 未全部成功，查看侧边栏后仍可人工入库。');
-      if (this.plugin.focusedPath === sourcePath) await this.plugin.openFile(result.draft_path);
-    }, Boolean(active) || source.indexed_revision === null || source.lifecycle_status !== 'active' || !['pending','compiled'].includes(source.processing_status ?? ''));
+      const round = await this.plugin.workflow.compile(fresh,profile);
+      const result = await this.waitRound(round.id); const item = result.items[0];
+      if (!item?.draft_path) throw new Error(item?.error?.message ?? result.error?.message ?? `Round ${result.status}`);
+      if (result.status !== 'succeeded') new Notice('Draft 已保留；Analyzer 未全部成功，查看侧边栏后仍可人工入库。');
+      if (this.plugin.focusedPath === sourcePath) await this.plugin.openFile(item.draft_path);
+    }, Boolean(active) || source.lifecycle_status !== 'active' || !['pending','compiled', ''].includes(source.processing_status ?? ''));
     const drafts = await this.plugin.workflow.drafts(source.path);
     if (this.plugin.focusedPath !== source.path) return;
     const list = this.section('Drafts');
@@ -203,23 +202,27 @@ class ReviewView extends ItemView {
     await this.markdown(this.section('Source Annotation'), source.annotation, source.path);
     this.button(this.panel, 'Open Source', () => this.plugin.openFile(source.path));
     const tasks = this.section('Draft Analyzer');
-    tasks.createEl('p', { text: analysis ? `Review: ${analysis.review.status} · Relation: ${analysis.relation.status}` : '尚未执行 Analyzer。', cls: 'ew-muted' });
+    const analyses = review.analyses ?? {review:analysis,relation:analysis};
+    tasks.createEl('p', { text: `Review: ${analyses.review?.review.status ?? 'Not run'} · Relation: ${analyses.relation?.relation.status ?? 'Not run'}`, cls: 'ew-muted' });
     this.button(tasks, 'Analyze Draft', async () => {
       const draftPath = draft.path; const profile = this.profileId;
       await this.plugin.flushEditors(); const fresh = await this.plugin.workflow.review(draftPath);
       const job = await this.plugin.workflow.analyze(fresh, profile); await this.waitJob<AnalyzerJob>(job.id);
     }, draft.lifecycle_status !== 'active' || source.lifecycle_status !== 'active' || source.kind !== 'source' || source.processing_status === 'archived' || Boolean(analysis && !finished(analysis.status)));
+    for (const task of ['review','relation'] as const) this.button(tasks,task === 'review' ? 'Retry Review' : 'Retry Relation',async () => {
+      await this.plugin.flushEditors(); const fresh = await this.plugin.workflow.review(draft.path); const job = await this.plugin.workflow.analyze(fresh,this.profileId,task); await this.waitJob<AnalyzerJob>(job.id);
+    },draft.lifecycle_status !== 'active' || source.lifecycle_status !== 'active' || source.kind !== 'source' || source.processing_status === 'archived' || Boolean(analysis && !finished(analysis.status)));
     if (analysis) {
-      for (const task of ['review','relation'] as const) if (analysis[task].error) tasks.createEl('p', { text: `${task}: ${analysis[task].error!.message}`, cls: 'ew-error' });
+      for (const task of ['review','relation'] as const) if (analyses[task]?.[task].error) tasks.createEl('p', { text: `${task}: ${analyses[task]![task].error!.message}`, cls: 'ew-error' });
       try {
-        const result = await this.plugin.client.request<Result>(`/v1/analysis/result?id=${encodeURIComponent(analysis.id)}`);
+        const results = await Promise.all((['review','relation'] as const).map(async task => ({task,result:analyses[task] ? await this.plugin.client.request<Result>(`/v1/analysis/result?id=${encodeURIComponent(analyses[task]!.id)}`) : null})));
         if (this.plugin.focusedPath !== draft.path) return;
-        if (result.stale) tasks.createEl('p', { text: `分析已过期：${result.stale_reasons.join('；')}。请按当前正文判断，可重新 Analyze。`, cls: 'ew-warning' });
-        await this.renderResults(result, source.path);
+        for (const {task,result} of results) if (result) { if (result.stale) tasks.createEl('p', { text: `${task} 已过期：${result.stale_reasons.join('；')}。请按当前正文判断。`, cls: 'ew-warning' }); await this.renderResults(result,source.path,task); }
       } catch (error) { tasks.createEl('p', { text: message(error), cls: 'ew-muted' }); }
       if (!finished(analysis.status)) this.pollDisplay();
     }
     const publish = this.section('Human Review');
+    this.button(publish,'Recompile feedback',async () => {await this.plugin.flushEditors();const fresh = await this.plugin.workflow.review(draft.path);new RecompileModal(this.plugin,fresh).open();},draft.lifecycle_status !== 'active' || source.kind !== 'source' || source.lifecycle_status !== 'active' || !['pending','compiled','reviewed'].includes(source.processing_status ?? '') || Boolean(analysis && !finished(analysis.status)));
     publish.createEl('p', { text: '修改和核对正文后，新建一份 Knowledge；保留 Source 和全部 Draft 文件，成功后 Source Archived、相关 Draft Discarded。', cls: 'ew-muted' });
     if (review.publication) {
       const record = review.publication;
@@ -232,18 +235,25 @@ class ReviewView extends ItemView {
       new PublishModal(this.plugin, fresh, () => this.plugin.refreshViews()).open();
     }, draft.lifecycle_status !== 'active' || source.kind !== 'source' || source.lifecycle_status !== 'active' || !['compiled','reviewed'].includes(source.processing_status ?? '') || !analysis || !finished(analysis.status));
   }
-  private async renderResults(result: Result, sourcePath: string) {
+  private async renderResults(result: Result, sourcePath: string, only?: 'review' | 'relation') {
     for (const task of ['review','relation'] as const) {
+      if (only && task !== only) continue;
       const output = result[task]; const parent = this.section(task === 'review' ? 'Review Analyzer' : 'Relation Analyzer');
       if (!output) { parent.createEl('p', { text: '本轮无有效输出。', cls: 'ew-muted' }); continue; }
-      await this.markdown(parent, output.summary, sourcePath);
       const items = 'findings' in output ? output.findings : output.suggestions;
+      if (!items.length) await this.markdown(parent, output.summary, sourcePath);
       for (const item of items) {
-        const detail = parent.createEl('details'); detail.createEl('summary', { text: item.category });
-        await this.markdown(detail, item.message, sourcePath);
+        const suggestion = parent.createDiv({ cls: 'ew-suggestion' });
+        await this.markdown(suggestion, item.message, sourcePath);
+        const detail = suggestion.createEl('details'); detail.createEl('summary', { text: 'Evidence' });
         for (const evidence of item.evidence) this.button(detail, `${evidence.path} · L${evidence.start_line}–${evidence.end_line}`, () => this.plugin.openFile(evidence.path));
       }
-      for (const limitation of output.limitations) parent.createEl('p', { text: limitation, cls: 'ew-muted' });
+      const actual = result.record?.[task].evidence;
+      const detail = parent.createEl('details'); detail.createEl('summary', { text: 'Coverage & details' });
+      if (items.length && output.summary) await this.markdown(detail, output.summary, sourcePath);
+      detail.createEl('p', { text: `Job ${result.job.id} · Draft ${result.job.draft_revision.slice(0,10)} · Library passages ${actual?.items.length ?? '—'}`, cls: 'ew-muted' });
+      for (const diagnostic of actual?.diagnostics ?? []) if (diagnostic.message) detail.createEl('p', { text: diagnostic.message, cls: 'ew-muted' });
+      for (const limitation of output.limitations) detail.createEl('p', { text: limitation, cls: 'ew-muted' });
     }
   }
   private pollDisplay() {
@@ -261,6 +271,26 @@ class ReviewView extends ItemView {
     }
     throw new Error('侧边栏已关闭；Core 继续运行。重新打开后查看结果。');
   }
+  private async waitRound(id: string): Promise<ProcessingRound> {
+    while (!this.closed) {const round = await this.plugin.workflow.round(id);this.feedback.setText(`Processing round · ${round.status} · ${round.items[0]?.phase ?? 'Registration'}`);if (finished(round.status)) return round;await new Promise(resolve => window.setTimeout(resolve,1000));}
+    throw new Error('侧边栏已关闭；Core 继续完整轮次。重新打开后查看结果。');
+  }
+}
+
+class RecompileModal extends Modal {
+  private request: RecompileRequest | null = null;
+  constructor(private readonly plugin: EngramWeavePlugin,private readonly review: DraftReview) {super(plugin.app);}
+  onOpen() {
+    this.contentEl.createEl('h2',{text:'Recompile feedback'}); this.contentEl.createEl('p',{text:'反馈追加到 Source Annotation，Source 回到 Pending。旧 Draft 和编辑保留；此操作不会立即调用模型。'});
+    let feedback = ''; const input = this.contentEl.createEl('textarea',{attr:{'aria-label':'Recompile feedback',maxlength:'8000'}});input.addEventListener('input',() => {if (this.request) input.value = this.request.feedback;else feedback = input.value;});
+    const status = this.contentEl.createEl('p',{cls:'ew-error',attr:{role:'status'}});
+    new Setting(this.contentEl).addButton(button => button.setButtonText('Cancel').onClick(() => this.close())).addButton(button => button.setButtonText('Request Recompile').setCta().onClick(async () => {
+      button.setDisabled(true);
+      try {await this.plugin.flushEditors();this.request ??= {request_id:randomUUID(),source_path:this.review.source.path,source_revision:this.review.source.revision,draft_path:this.review.draft.path,draft_revision:this.review.draft.revision,feedback};const result = await this.plugin.workflow.recompile(this.request);this.close();new Notice(`Recompile requested · ${result.recompile_count}`);this.plugin.refreshViews();}
+      catch(error) {status.setText(message(error));if (/^(SOURCE_CHANGED|PATH_CONFLICT|INVALID_SOURCE|VALIDATION_ERROR):/.test(message(error))) button.setButtonText('关闭后重新检查');else {button.setButtonText('Retry request');button.setDisabled(false);}}
+    }));
+  }
+  onClose() {this.contentEl.empty();}
 }
 
 class PublishModal extends Modal {
