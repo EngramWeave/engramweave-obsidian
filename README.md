@@ -2,7 +2,7 @@
 
 在 Obsidian 原生编辑 Draft，右侧查看 Source Annotation、Review Analyzer 与 Relation Analyzer。用统一 Review Note 创建 Idea、提交 Recompile 反馈或确认 Review Complete；也可通过独立 MVP 入口明确新建 `40_Knowledge` 笔记。Core 负责模型执行、状态、文件保护和恢复，插件不改写分析输出到正文。
 
-本插件面向 Windows 本地 Vault。Source 可以有多份 Draft；Review Complete 明确选择其中一份进入规划，每份 Draft 自己拥有 Integration Intent。MVP 成功入库后 Source 进入 archived，全部关联 Draft 标记 discarded 并保留文件。只支持单 Source Draft 和新建 Knowledge，不覆盖／融合已有笔记。Core 完整轮次、调度、独立分析重试和 Zotero Capture 已提供；Planner、ChangeSet、完整 diff／恢复和自动 Vault Git 留待后续阶段。正式笔记可用现有 Git 工具管理。
+本插件面向 Windows 本地 Vault。Source 可以有多份独立保留的 Draft；Review Complete 明确选择其中一份进入规划，每份 Draft 自己拥有 Integration Intent。MVP 成功入库后 Source 进入 archived，全部关联 Draft 标记 discarded 并保留文件。只支持单 Source Draft 和新建 Knowledge，不覆盖／融合已有笔记。Core 完整轮次、调度、独立分析重试和 Zotero Capture 已提供；Planner、ChangeSet 和自动 Vault Git 留待后续阶段。重编译保留旧稿及修改，不要求 Draft 之间的 diff 或独立 rollback 界面；正式笔记可用现有 Git 工具管理。
 
 ## 安装
 
