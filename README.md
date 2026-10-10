@@ -41,6 +41,10 @@ AI 分析可选，未分析的 Draft 也可 **Review Complete**。模型失败�
 
 入库异常时保留确认输入和原 `request_id`，可在当前弹窗重试。不关闭弹窗即可重试不确定送达；重开插件时 Core 启动恢复记录，Draft 侧边栏显示完成或未完成结果。已发表内容不会被重复创建或覆盖。Source／Draft 并发变化、目标被删除或替换时，检查错误和保留文件再解决冲突；不能用删除恢复记录当作取消。详细规则见 [Core 合同](../engramweave/docs/obsidian-mvp.md)。
 
+备份时将 Vault 与对应 Core 应用数据一并保留。Intent、已接受反馈和撤销记录不在 Vault 内；只恢复 Markdown 或 SQLite 不足以恢复全部工作流。Core 离线恢复完成后需用同一配置正常启动，再在侧栏核对当前选择、各稿 Intent 和原请求查明入口。详细步骤见 [备份与 P2 恢复](../engramweave/docs/recovery.md)。启动插件不会自动重投未知请求或执行模型。
+
+侧栏一次刷新中同一 Analyzer 结果 ID 只读取一次；Review／Relation 使用不同 Job 时分别读取，不跨刷新复用旧结果，也不省略过期检查。
+
 ## 验证
 
 `npm test` 验证本机连接、Vault 身份、输入消费、后续编辑保护和有界送达恢复；`npm run build` 检查官方 Obsidian 类型并生成安装文件。

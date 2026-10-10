@@ -244,7 +244,14 @@ class ReviewView extends ItemView {
     if (analysis) {
       for (const task of ['review','relation'] as const) if (analyses[task]?.[task].error) tasks.createEl('p', { text: `${task}: ${analyses[task]![task].error!.message}`, cls: 'ew-error' });
       try {
-        const results = await Promise.all((['review','relation'] as const).map(async task => ({task,result:analyses[task] ? await this.plugin.client.request<Result>(`/v1/analysis/result?id=${encodeURIComponent(analyses[task]!.id)}`) : null})));
+        const fetched = new Map<string, Promise<Result>>();
+        const results = await Promise.all((['review','relation'] as const).map(async task => {
+          const job = analyses[task];
+          if (!job) return { task, result: null };
+          let result = fetched.get(job.id);
+          if (!result) { result = this.plugin.client.request<Result>(`/v1/analysis/result?id=${encodeURIComponent(job.id)}`); fetched.set(job.id, result); }
+          return { task, result: await result };
+        }));
         if (this.plugin.focusedPath !== draft.path) return;
         for (const {task,result} of results) if (result) { if (result.stale) tasks.createEl('p', { text: `${task} 已过期：${result.stale_reasons.join('；')}。请按当前正文判断。`, cls: 'ew-warning' }); await this.renderResults(result,source.path,task); }
       } catch (error) { tasks.createEl('p', { text: message(error), cls: 'ew-muted' }); }
