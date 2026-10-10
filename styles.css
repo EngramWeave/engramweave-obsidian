@@ -14,3 +14,5 @@
 .engramweave-review details { margin: 8px 0; }
 .engramweave-review summary { cursor: pointer; font-weight: 600; }
 .ew-target-path { display: block; overflow-wrap: anywhere; white-space: normal; padding: 8px; }
+.engramweave-review .ew-review-note { width: 100%; min-height: 9em; resize: vertical; line-height: 1.5; }
+.engramweave-review .ew-intent { white-space: pre-wrap; overflow-wrap: anywhere; }

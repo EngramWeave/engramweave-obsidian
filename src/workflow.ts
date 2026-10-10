@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AnalyzerJob, AnalyzeRequest, Document, Draft, DraftReview, PublishDraftRequest, PublishDraftResponse, ProcessingRound, ProcessingRequest, RecompileRequest, RecompileResponse } from '@engramweave/contracts';
+import type { AnalyzerJob, AnalyzeRequest, Document, Draft, DraftReview, PublishDraftRequest, PublishDraftResponse, ProcessingRound, ProcessingRequest, RecompileRequest, RecompileResponse, HumanReviewRequest, HumanReviewResponse, ReviewActionReceipt } from '@engramweave/contracts';
 import type { CoreClient } from './connection';
 
 export const finished = (status: string) => !['queued', 'running'].includes(status);
@@ -35,5 +35,7 @@ export class Workflow {
   }
   round(id: string) {return this.client.request<ProcessingRound>(`/v1/processing-round?id=${encodeURIComponent(id)}`);}
   recompile(request: RecompileRequest) {return this.client.request<RecompileResponse>('/v1/recompile',request);}
+  humanReview(request: HumanReviewRequest, vault: string) { return this.client.request<HumanReviewResponse>('/v1/human-review', request, vault); }
+  reviewAction(id: string, vault: string) { return this.client.request<ReviewActionReceipt>(`/v1/review-action?id=${encodeURIComponent(id)}`, undefined, vault); }
   publish(request: PublishDraftRequest) { return this.client.request<PublishDraftResponse>('/v1/draft-publications', request); }
 }

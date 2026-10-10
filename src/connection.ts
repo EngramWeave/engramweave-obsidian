@@ -4,9 +4,10 @@ import type { Status } from '@engramweave/contracts';
 
 export interface Connection { base: string; token: string; vault: string }
 export interface Transport { (url: string, options: { method: string; headers: Record<string, string>; body?: string }): Promise<{ status: number; json: unknown }> }
-const key = (value: string) => path.resolve(value).replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
+export const vaultKey = (value: string) => path.resolve(value).replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
+const key = vaultKey;
 const contains = (root: string, child: string) => key(root) === key(child) || key(child).startsWith(`${key(root)}/`);
-async function readLocalFile(filename: string, limit: number) {
+export async function readLocalFile(filename: string, limit: number) {
   const info = await lstat(filename);
   if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size > limit || key(await realpath(filename)) !== key(filename)) throw new Error('Local Core configuration or token file is unsafe');
   const bytes = await readFile(filename);
@@ -38,10 +39,11 @@ export class CoreClient {
       || key(status.vault_path) !== key(candidate.vault)) throw new Error('Core is unavailable or attached to a different Vault');
     this.connection = candidate; return status;
   }
-  async request<T>(route: string, body?: unknown): Promise<T> {
+  async request<T>(route: string, body?: unknown, expectedVault?: string): Promise<T> {
     if (!/^\/v1\/[a-z0-9/?=&_.%-]+$/i.test(route)) throw new Error('Invalid Core route');
     if (!this.connection) await this.connect();
     const connection = this.connection!;
+    if (expectedVault && key(expectedVault) !== key(connection.vault)) throw new Error('The pending action belongs to a different Vault');
     let response;
     try { response = await this.transport(`${connection.base}${route}`, { method: body === undefined ? 'GET' : 'POST',
       headers: { authorization: `Bearer ${connection.token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
@@ -50,8 +52,11 @@ export class CoreClient {
     if (response.status < 200 || response.status >= 300) {
       if ([401,503].includes(response.status)) this.disconnect();
       const error = (response.json as { error?: { code?: string; message?: string } })?.error;
-      throw new Error(`${error?.code ?? `HTTP ${response.status}`}: ${error?.message ?? 'Core request failed'}`);
+      throw new CoreResponseError(response.status, error?.code ?? `HTTP ${response.status}`, error?.message ?? 'Core request failed');
     }
     return response.json as T;
   }
+}
+export class CoreResponseError extends Error {
+  constructor(readonly status: number, readonly code: string, text: string) { super(`${code}: ${text}`); }
 }

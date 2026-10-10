@@ -51,3 +51,8 @@ it('chooses a legal Knowledge filename for punctuation and reserved Windows name
   expect(knowledgeFilename('NUL')).toBe('40_Knowledge/Knowledge-NUL.md');
   expect(knowledgeFilename('../')).toBe('40_Knowledge/-.md');
 });
+it('refuses a pending operation for another Vault before transmitting its input', async () => {
+ const transport=vi.fn().mockResolvedValue({status:200,json:{api_version:'1',status:'ready',vault_path:'D:\\Vault'}});
+ const client=new CoreClient(transport,async()=>({base:'http://127.0.0.1:43127',token:'a'.repeat(64),vault:'D:\\Vault'}));
+ await expect(client.request('/v1/human-review',{note:'Private input'},'D:\\Other')).rejects.toThrow('different Vault');expect(transport).toHaveBeenCalledTimes(1);expect(transport.mock.calls[0]![1].method).toBe('GET');
+});

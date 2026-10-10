@@ -1,9 +1,13 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { realpath } from 'node:fs/promises';
 import { FileSystemAdapter, ItemView, MarkdownRenderer, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, type WorkspaceLeaf } from 'obsidian';
 import { requestUrl } from 'obsidian';
 import type { AnalysisSettings, AnalyzerJob, CompilerJob, Job, DraftReview, Document, Status, ReviewResult, RelationResult, PublishDraftRequest, ProcessingRound, RecompileRequest } from '@engramweave/contracts';
 import { CoreClient, readConnection } from './connection';
+import { ReviewNotes } from './review-note';
+import { ReviewRecovery } from './review-recovery';
+import { renderHumanReview } from './human-review-view';
 import { finished, knowledgeFilename, publicationRequest, Workflow } from './workflow';
 
 const VIEW = 'engramweave-review';
@@ -16,6 +20,8 @@ export default class EngramWeavePlugin extends Plugin {
   settings: Settings = { config_path: '' };
   client!: CoreClient;
   workflow!: Workflow;
+  notes!: ReviewNotes;
+  reviewRecoveryError: string | null = null;
   focusedPath: string | null = null;
   async onload() {
     const saved = await this.loadData() as Partial<Settings> | null;
@@ -29,6 +35,12 @@ export default class EngramWeavePlugin extends Plugin {
       return readConnection(this.settings.config_path, this.app.vault.adapter.getBasePath());
     });
     this.workflow = new Workflow(this.client);
+    if (!(this.app.vault.adapter instanceof FileSystemAdapter)) throw new Error('Human Review requires a local desktop Vault');
+    const vault = this.app.vault.adapter.getBasePath();
+    const applicationData = process.env.LOCALAPPDATA;
+    if (!applicationData) throw new Error('Desktop application data directory is unavailable');
+    this.notes = new ReviewNotes(this.client, vault, new ReviewRecovery(await realpath(applicationData), vault));
+    try { await this.notes.initialize(); } catch (error) { this.reviewRecoveryError = message(error); new Notice(this.reviewRecoveryError); }
     this.registerView(VIEW, leaf => new ReviewView(leaf, this));
     this.addSettingTab(new ConnectionSettings(this));
     this.addRibbonIcon('brain-circuit', 'Open EngramWeave review', () => { void this.openReview(); });
@@ -105,10 +117,14 @@ class ReviewView extends ItemView {
   private readonly feedback: HTMLElement;
   private readonly panel: HTMLElement;
   private polling = false;
+  private refreshing = false;
+  private refreshAgain = false;
+  private readonly recovery: HTMLElement;
   constructor(leaf: WorkspaceLeaf, private readonly plugin: EngramWeavePlugin) {
     super(leaf);
     this.contentEl.addClass('engramweave-review');
     this.feedback = this.contentEl.createDiv({ cls: 'ew-feedback', attr: { role: 'status', 'aria-live': 'polite' } });
+    this.recovery = this.contentEl.createDiv();
     this.panel = this.contentEl.createDiv();
   }
   getViewType() { return VIEW; }
@@ -135,6 +151,13 @@ class ReviewView extends ItemView {
   }
   async refresh() {
     if (this.closed || this.operating) return;
+    const editing = this.panel.querySelector<HTMLTextAreaElement>('.ew-review-note');
+    if (editing && editing.dataset.draft === this.plugin.focusedPath && editing === editing.ownerDocument.activeElement) {
+      // Do not replace a live input during polling or file notifications; resume display refresh after focus leaves it.
+      this.pollDisplay(); return;
+    }
+    if (this.refreshing) { this.refreshAgain = true; return; }
+    this.refreshing = true; this.renderRecovery();
     const epoch = ++this.epoch;
     const relative = this.plugin.focusedPath;
     try {
@@ -145,8 +168,11 @@ class ReviewView extends ItemView {
       const settings = await this.plugin.client.request<{ settings: AnalysisSettings }>('/v1/analysis/settings');
       if (this.profileId && !settings.settings.profiles.some(profile => profile.id === this.profileId)) this.profileId = '';
       const document = relative.startsWith('30_Drafts/') ? await this.plugin.workflow.review(relative) : await this.plugin.workflow.source(relative);
-      if (epoch !== this.epoch || this.closed) return;
-      const scroll = this.contentEl.scrollTop; this.panel.empty();
+      if (epoch !== this.epoch || this.closed || relative !== this.plugin.focusedPath) return;
+      const scroll = this.contentEl.scrollTop;
+      const focused = this.panel.querySelector<HTMLTextAreaElement>('.ew-review-note');
+      const cursor = focused && focused === this.app.workspace.containerEl.ownerDocument.activeElement ? { path:focused.dataset.draft, start:focused.selectionStart, end:focused.selectionEnd } : null;
+      this.panel.empty();
       this.panel.createEl('h2', { text: relative.startsWith('30_Drafts/') ? (document as DraftReview).draft.title : (document as Document).title });
       const toolbar = this.panel.createDiv({ cls: 'ew-actions' }); this.button(toolbar, 'Refresh', async () => { await this.refresh(); });
       const select = toolbar.createEl('select', { attr: { 'aria-label': 'Analysis Profile' } });
@@ -155,8 +181,11 @@ class ReviewView extends ItemView {
       select.value = this.profileId; select.addEventListener('change', () => { this.profileId = select.value; });
       if (relative.startsWith('30_Drafts/')) await this.renderDraft(document as DraftReview);
       else await this.renderSource(document as Document);
+      const restored = this.panel.querySelector<HTMLTextAreaElement>('.ew-review-note');
+      if(cursor && restored && restored.dataset.draft === cursor.path) { restored.focus({preventScroll:true}); restored.setSelectionRange(cursor.start,cursor.end); }
       this.contentEl.scrollTop = scroll;
     } catch (error) { if (epoch === this.epoch && !this.closed) { this.panel.empty(); this.panel.createEl('p', { text: message(error), cls: 'ew-error' }); this.button(this.panel, 'Reconnect', async () => { this.plugin.client.disconnect(); await this.plugin.client.connect(); }); } }
+    finally { this.refreshing = false; if(this.refreshAgain) { this.refreshAgain = false; void this.refresh(); } }
   }
   private async renderSource(source: Document) {
     if (source.kind !== 'source') return;
@@ -221,8 +250,10 @@ class ReviewView extends ItemView {
       } catch (error) { tasks.createEl('p', { text: message(error), cls: 'ew-muted' }); }
       if (!finished(analysis.status)) this.pollDisplay();
     }
-    const publish = this.section('Human Review');
-    this.button(publish,'Recompile feedback',async () => {await this.plugin.flushEditors();const fresh = await this.plugin.workflow.review(draft.path);new RecompileModal(this.plugin,fresh).open();},draft.lifecycle_status !== 'active' || source.kind !== 'source' || source.lifecycle_status !== 'active' || !['pending','compiled','reviewed'].includes(source.processing_status ?? '') || Boolean(analysis && !finished(analysis.status)));
+    renderHumanReview({ notes:this.plugin.notes, review, error:this.plugin.reviewRecoveryError, parent:this.section('Human Review'),
+      button:(...args) => this.button(...args), fresh:async () => { await this.plugin.flushEditors(); return this.plugin.workflow.review(draft.path); },
+      open:relative => this.plugin.openFile(relative), focused:() => this.plugin.focusedPath });
+    const publish = this.section('MVP · Publish to Knowledge');
     publish.createEl('p', { text: '修改和核对正文后，新建一份 Knowledge；保留 Source 和全部 Draft 文件，成功后 Source Archived、相关 Draft Discarded。', cls: 'ew-muted' });
     if (review.publication) {
       const record = review.publication;
@@ -256,6 +287,17 @@ class ReviewView extends ItemView {
       for (const limitation of output.limitations) detail.createEl('p', { text: limitation, cls: 'ew-muted' });
     }
   }
+  private renderRecovery() {
+    this.recovery.empty();
+    if(this.plugin.reviewRecoveryError) this.recovery.createEl('p',{text:this.plugin.reviewRecoveryError,cls:'ew-error'});
+    for(const record of this.plugin.notes.operations()) {
+      const box=this.recovery.createEl('section',{cls:'ew-section'});box.createEl('p',{text:record.action+' · '+record.request.draft_path,cls:'ew-warning'});
+      const preview=box.createEl('details');preview.createEl('summary',{text:'Original submitted input'});preview.createEl('p',{text:'feedback' in record.request ? record.request.feedback : record.request.note,cls:'ew-intent'});
+      this.button(box,'Open Draft',()=>this.plugin.openFile(record.request.draft_path));
+      this.button(box,'Check Result',async()=> {const receipt=await this.plugin.notes.check(record.request.draft_path);new Notice(receipt.status==='completed'?'Action confirmed':receipt.status==='unfinished'?'Core has accepted this action; resolve its file conflict and retry':'No receipt yet; Retry Original keeps the same request ID');});
+      this.button(box,'Retry Original',async()=> {await this.plugin.notes.retry(record.request.draft_path);new Notice('Original action confirmed');});
+    }
+  }
   private pollDisplay() {
     if (this.polling) return;
     this.polling = true;
@@ -275,22 +317,6 @@ class ReviewView extends ItemView {
     while (!this.closed) {const round = await this.plugin.workflow.round(id);this.feedback.setText(`Processing round · ${round.status} · ${round.items[0]?.phase ?? 'Registration'}`);if (finished(round.status)) return round;await new Promise(resolve => window.setTimeout(resolve,1000));}
     throw new Error('侧边栏已关闭；Core 继续完整轮次。重新打开后查看结果。');
   }
-}
-
-class RecompileModal extends Modal {
-  private request: RecompileRequest | null = null;
-  constructor(private readonly plugin: EngramWeavePlugin,private readonly review: DraftReview) {super(plugin.app);}
-  onOpen() {
-    this.contentEl.createEl('h2',{text:'Recompile feedback'}); this.contentEl.createEl('p',{text:'反馈追加到 Source Annotation，Source 回到 Pending。旧 Draft 和编辑保留；此操作不会立即调用模型。'});
-    let feedback = ''; const input = this.contentEl.createEl('textarea',{attr:{'aria-label':'Recompile feedback',maxlength:'8000'}});input.addEventListener('input',() => {if (this.request) input.value = this.request.feedback;else feedback = input.value;});
-    const status = this.contentEl.createEl('p',{cls:'ew-error',attr:{role:'status'}});
-    new Setting(this.contentEl).addButton(button => button.setButtonText('Cancel').onClick(() => this.close())).addButton(button => button.setButtonText('Request Recompile').setCta().onClick(async () => {
-      button.setDisabled(true);
-      try {await this.plugin.flushEditors();this.request ??= {request_id:randomUUID(),source_path:this.review.source.path,source_revision:this.review.source.revision,draft_path:this.review.draft.path,draft_revision:this.review.draft.revision,feedback};const result = await this.plugin.workflow.recompile(this.request);this.close();new Notice(`Recompile requested · ${result.recompile_count}`);this.plugin.refreshViews();}
-      catch(error) {status.setText(message(error));if (/^(SOURCE_CHANGED|PATH_CONFLICT|INVALID_SOURCE|VALIDATION_ERROR):/.test(message(error))) button.setButtonText('关闭后重新检查');else {button.setButtonText('Retry request');button.setDisabled(false);}}
-    }));
-  }
-  onClose() {this.contentEl.empty();}
 }
 
 class PublishModal extends Modal {
