@@ -10,6 +10,8 @@ The sidebar shows Source Annotation, Review and Relation results, task failures 
 
 ## Planned P3 ChangeSet review
 
+The [component implementation plan](docs/p3-a-implementation-plan.md) specifies the A0 native MergeView feasibility slice and A3 integration with real Core candidate reads/saves. The shared [A plan](../engramweave-docs/P3_A_IMPLEMENTATION_PLAN.md) keeps complete proposal review and approval in B; an editor feasibility check is not evidence of persistent saving or formal application.
+
 Use a custom ItemView with CodeMirror 6 MergeView to review Core-managed candidates in Vault-root `70_ChangeSets/<id>/`: Current on the left is read-only and Candidate on the right is editable. Save/Ctrl+S changes only Candidate, Refresh Current preserves Candidate edits, and navigation/closure must expose unsaved state rather than silently losing edits. Approval saves and validates final candidates before delegating protected application, archival/recovery and scoped Git to Core; the plugin never applies formal files itself. Keep Drafts in the native editor and avoid a second editable Desktop review surface, a persistent Base directory or automatic three-way merge.
 
 Core excludes this workspace from ordinary registration/recall and Git; document Obsidian search and Sync exclusions separately. Model execution remains in Core/Desktop, with Agent and task-scoped MCP tools as the P3 priority; retain existing P2 API behavior without requiring a new Planner API path. This review surface is not implemented yet. See [the Vault-local review decision](../engramweave-docs/docs/adr/0020-vault-local-changeset-review.md) and [P3 scope](../engramweave-docs/P3_IMPLEMENTATION_PLAN.md).
