@@ -63,8 +63,13 @@ Human Review 检查：分别输入 Idea、反馈、Intent，核对各自去向�
 
 **Preview Candidate** 先保存候选，再在新标签用 Obsidian 原生阅读视图打开对应 Markdown；保存失败或出现新编辑不会打开过期预览。原 Draft 文件保留。
 
-**Cancel ChangeSet** 清理未批准方案，保留 Draft／Intent，并在有效选择下返回 reviewed；**Cancel Review Complete** 返回 compiled。目前可生成、编辑和取消候选，完整影响审查／拒绝／批准、正式 Executor、归档与恢复合并在 P3-BC 一次交付；Git 属于 D。插件不能通过候选保存修改正式文件。
+**Cancel ChangeSet** 清理未批准方案，保留 Draft／Intent，并在有效选择下返回 reviewed；**Cancel Review Complete** 返回 compiled。现已支持全部影响审查、逐项／整组取舍、新领域授权和确定性批准执行；Git 仍属于 D。插件不能通过候选保存修改正式文件。
 
 建议 Vault Git 排除 `/70_ChangeSets/`，Obsidian 的 Files and links → Excluded files 另加 `70_ChangeSets`；使用 Obsidian Sync 时另外设置排除，避免临时方案混入搜索或同步。Core 不自动改动这些用户设置。备份需同时保留未消费候选及 Core Planner/Human Review 回执，见 [Planner 合同](../engramweave/docs/planning.md)。
 
 原生检查还应覆盖中文输入、长文滚动、保存重开、刷新后的撤销、未保存关闭、断线和外部候选冲突；自动 API/mock 测试与原生宿主验证分别记录。
+
+
+侧栏决定每个条目的纳入／拒绝，并查看目录和 discarded 提案的只读 Current。AI 理由与证据在人工编辑后仅作参考。**审查批准清单** 会保存全部脏候选，再以 **Approve & Apply** 一次批准立即执行；至少纳入一项正文，所需新领域须明确授权。Current 刷新后应自行把新增内容合入 Candidate，批准不会使用规划时的旧版本作为目标条件。
+
+未批准时 **打回重新规划** 清理候选和未保存编辑，再按当前 Draft、Intent 与知识库启动新规划。已接受请求只能查明或以原 ID 恢复，不允许取消／换 ID 绕过。送达不明输入暂存于 Vault 外，重开不会自动重投。完成后 Source 仅变为 archived，相关 Draft 仅标记 discarded，保留正文／Intent；消费的工作区清理，重开显示结果。快捷 Publish 使用同一执行和归档保障，仍无需 Planner 或第二次批准。完整合同与备份范围见 [Planner](../engramweave/docs/planning.md)。

@@ -2,6 +2,8 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, lstat, readFile, writeFile, rename, unlink, realpath } from 'node:fs/promises';
 import { vaultKey } from './connection';
+import { Value } from '@sinclair/typebox/value';
+import { ChangeSetApprovalSchema, type ChangeSetApproval } from '@engramweave/contracts';
 
 export interface CandidateRecoveryRecord { changeset_id: string; item_id: string; content: string; savedContent: string; revision: string }
 export class CandidateRecovery {
@@ -47,4 +49,23 @@ export class CandidateRecovery {
     this.serial = operation.catch(() => {}); return operation;
   }
   async flush() { await this.serial; }
+  private async approvalFile(id: string) { const file = await this.file(id, id); return path.join(path.dirname(file), `${id}-approval.json`); }
+  async loadApproval(id: string): Promise<ChangeSetApproval | null> {
+    const file = await this.approvalFile(id); const info = await lstat(file).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+    if (!info) return null;
+    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size > 128000) throw new Error('Unsafe pending approval');
+    const record = JSON.parse(await readFile(file, 'utf8'));
+    if (record.vault !== vaultKey(this.vault) || !Value.Check(ChangeSetApprovalSchema, record.request) || record.request.changeset_id !== id) throw new Error('Invalid pending approval');
+    return record.request;
+  }
+  persistApproval(id: string, request: ChangeSetApproval | null) {
+    const operation = this.serial.then(async () => {
+      const file = await this.approvalFile(id); const info = await lstat(file).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+      if (info && (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1)) throw new Error('Unsafe pending approval target');
+      if (!request) { if (info) await unlink(file); return; }
+      if (!Value.Check(ChangeSetApprovalSchema, request) || request.changeset_id !== id) throw new Error('Invalid approval');
+      const text = JSON.stringify({ vault: vaultKey(this.vault), request }); if (Buffer.byteLength(text) > 128000) throw new Error('Approval exceeds bound');
+      const temporary = `${file}.${randomUUID()}.tmp`; await writeFile(temporary, text, { flag: 'wx', mode: 0o600, flush: true }); await rename(temporary, file);
+    }); this.serial = operation.catch(() => {}); return operation;
+  }
 }
