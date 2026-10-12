@@ -16,7 +16,7 @@ Per-file buffers preserve later typing across save responses. Dirty edits are te
 
 Explicit Source Restore is Core-owned and resets only the discarded Source to active/pending without starting inference; Drafts, formal content and Draft-owned Intents remain retained, while old selection and canceled ChangeSets are not restored.
 
-The sidebar can plan the explicitly selected Reviewed Draft after flushing editors, and open ready results. Desktop opens the same view through a Vault-checked protocol link. Cancel ChangeSet returns valid selection to reviewed; Cancel Review Complete removes the proposal and returns compiled, preserving Intent. Full impact review, rejection and approval remain P3-B; the plugin exposes no premature apply button.
+The sidebar can plan the explicitly selected Reviewed Draft after flushing editors, and open ready results. Desktop opens the same view through a Vault-checked protocol link. Cancel ChangeSet returns valid selection to reviewed; Cancel Review Complete removes the proposal and returns compiled, preserving Intent. Full impact review, rejection, final approval, formal execution, archival and recovery are one combined P3-BC delivery. Scoped Git remains D; the plugin exposes no premature apply button. The current implementation scope is the [local BC plan](../engramweave-docs/.local/P3/P3_BC_IMPLEMENTATION_PLAN.md) and [BC task list](../engramweave-docs/.local/P3/P3_BC_TODO.md).
 
 Candidates are excluded from Core registration/recall. Git, Obsidian search and Sync exclusions have separate configuration, documented in the [README](README.md). No Base directory, automatic three-way merge or second editable Desktop surface is introduced.
 

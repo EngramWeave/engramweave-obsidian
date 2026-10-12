@@ -63,7 +63,7 @@ Human Review 检查：分别输入 Idea、反馈、Intent，核对各自去向�
 
 **Preview Candidate** 先保存候选，再在新标签用 Obsidian 原生阅读视图打开对应 Markdown；保存失败或出现新编辑不会打开过期预览。原 Draft 文件保留。
 
-**Cancel ChangeSet** 清理未批准方案，保留 Draft／Intent，并在有效选择下返回 reviewed；**Cancel Review Complete** 返回 compiled。目前可生成、编辑和取消候选，完整影响审查／拒绝／批准、正式 Executor 与 Git 属于后续 P3 阶段。插件不能通过候选保存修改正式文件。
+**Cancel ChangeSet** 清理未批准方案，保留 Draft／Intent，并在有效选择下返回 reviewed；**Cancel Review Complete** 返回 compiled。目前可生成、编辑和取消候选，完整影响审查／拒绝／批准、正式 Executor、归档与恢复合并在 P3-BC 一次交付；Git 属于 D。插件不能通过候选保存修改正式文件。
 
 建议 Vault Git 排除 `/70_ChangeSets/`，Obsidian 的 Files and links → Excluded files 另加 `70_ChangeSets`；使用 Obsidian Sync 时另外设置排除，避免临时方案混入搜索或同步。Core 不自动改动这些用户设置。备份需同时保留未消费候选及 Core Planner/Human Review 回执，见 [Planner 合同](../engramweave/docs/planning.md)。
 
