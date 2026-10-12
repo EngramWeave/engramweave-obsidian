@@ -16,3 +16,15 @@
 .ew-target-path { display: block; overflow-wrap: anywhere; white-space: normal; padding: 8px; }
 .engramweave-review .ew-review-note { width: 100%; min-height: 9em; resize: vertical; line-height: 1.5; }
 .engramweave-review .ew-intent { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.ew-merge-labels { display: flex; gap: 1rem; padding: .5rem 0; }
+.ew-merge-labels > span { width: 50%; }
+.ew-changeset-content { display: flex; flex-direction: column; height: 100%; }
+.ew-merge-editor { flex: 1; min-height: 240px; overflow: hidden; }
+.ew-merge-editor .cm-mergeView { height: 100%; }
+.ew-changeset-controls { display: grid; gap: 12px; }
+.ew-changeset-controls label { display: grid; gap: 6px; }
+.ew-changeset-controls select { width: 100%; min-width: 0; }
+.ew-changeset-controls p { margin: 0; overflow-wrap: anywhere; }
+.ew-changeset-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ew-changeset-actions button { white-space: normal; }

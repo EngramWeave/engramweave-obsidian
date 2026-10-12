@@ -9,6 +9,9 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@codemirror/commands": "6.10.3",
+    "@codemirror/lang-markdown": "6.5.0",
+    "@codemirror/merge": "6.12.2",
     "@engramweave/contracts": "file:../engramweave/packages/contracts",
     "@sinclair/typebox": "0.34.52",
     "@types/node": "24.12.0",

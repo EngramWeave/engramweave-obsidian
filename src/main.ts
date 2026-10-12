@@ -4,11 +4,16 @@ import { realpath } from 'node:fs/promises';
 import { FileSystemAdapter, ItemView, MarkdownRenderer, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, type WorkspaceLeaf } from 'obsidian';
 import { requestUrl } from 'obsidian';
 import type { AnalysisSettings, AnalyzerJob, CompilerJob, Job, DraftReview, Document, Status, ReviewResult, RelationResult, PublishDraftRequest, ProcessingRound, RecompileRequest } from '@engramweave/contracts';
-import { CoreClient, readConnection } from './connection';
+import { CoreClient, readConnection, vaultKey } from './connection';
 import { ReviewNotes } from './review-note';
 import { ReviewRecovery } from './review-recovery';
 import { renderHumanReview } from './human-review-view';
 import { finished, knowledgeFilename, publicationRequest, Workflow } from './workflow';
+
+import { ChangeSetView, CHANGESET_VIEW } from './changeset-view';
+import { CandidateRecovery } from './candidate-recovery';
+import { CandidateBuffer } from './candidate-buffer';
+import type { ChangeSet, PlannerJob } from '@engramweave/contracts';
 
 const VIEW = 'engramweave-review';
 interface Settings { config_path: string }
@@ -21,8 +26,11 @@ export default class EngramWeavePlugin extends Plugin {
   client!: CoreClient;
   workflow!: Workflow;
   notes!: ReviewNotes;
+  candidateRecovery!: CandidateRecovery;
+  candidateBuffers = new Map<string,CandidateBuffer>();
   reviewRecoveryError: string | null = null;
   focusedPath: string | null = null;
+  changeSetFocus: ChangeSetView | null = null;
   async onload() {
     const saved = await this.loadData() as Partial<Settings> | null;
     this.settings.config_path = typeof saved?.config_path === 'string' ? saved.config_path :
@@ -41,18 +49,30 @@ export default class EngramWeavePlugin extends Plugin {
     if (!applicationData) throw new Error('Desktop application data directory is unavailable');
     this.notes = new ReviewNotes(this.client, vault, new ReviewRecovery(await realpath(applicationData), vault));
     try { await this.notes.initialize(); } catch (error) { this.reviewRecoveryError = message(error); new Notice(this.reviewRecoveryError); }
+    this.candidateRecovery = new CandidateRecovery(await realpath(applicationData),vault);
+    this.registerView(CHANGESET_VIEW,leaf=>new ChangeSetView(leaf,this));
+    this.registerObsidianProtocolHandler('engramweave-changeset',params=>{
+      if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(params.changeset_id??'')||vaultKey(params.vault_path??'')!==vaultKey(vault)){
+        new Notice('ChangeSet 链接不属于当前 Vault。');return;
+      }
+      void this.openChangeSet(params.changeset_id!).catch(error=>new Notice(message(error)));
+    });
+    this.addCommand({id:'open-changeset',name:'Open ChangeSet candidates',callback:()=>{new ChangeSetPicker(this).open();}});
     this.registerView(VIEW, leaf => new ReviewView(leaf, this));
     this.addSettingTab(new ConnectionSettings(this));
     this.addRibbonIcon('brain-circuit', 'Open EngramWeave review', () => { void this.openReview(); });
     this.addCommand({ id: 'open-review', name: 'Open Draft review sidebar', callback: () => { void this.openReview(); } });
     this.registerEvent(this.app.workspace.on('file-open', file => {
+      if (!file || !this.changeSetFocus?.matchesPreview(file.path)) this.changeSetFocus = null;
       if (file && /^(20_Sources|30_Drafts)\//.test(file.path)) this.focusedPath = file.path;
       else this.focusedPath = null;
       this.refreshViews();
     }));
     this.registerEvent(this.app.workspace.on('active-leaf-change', leaf => {
+      if (leaf?.view instanceof ChangeSetView) { this.activateChangeSet(leaf.view); return; }
       if (leaf?.view instanceof MarkdownView) {
         const file = leaf.view.file;
+        if (!file || !this.changeSetFocus?.matchesPreview(file.path)) this.changeSetFocus = null;
         this.focusedPath = file && /^(20_Sources|30_Drafts)\//.test(file.path) ? file.path : null;
         this.refreshViews();
       }
@@ -70,7 +90,17 @@ export default class EngramWeavePlugin extends Plugin {
       this.refreshViews();
     });
   }
-  onunload() { this.client.disconnect(); }
+  async onunload() { for(const buffer of this.candidateBuffers.values()) await this.candidateRecovery.persist(buffer.snapshot(),buffer.dirty).catch(()=>{});await this.candidateRecovery.flush();this.client.disconnect(); }
+  async openChangeSet(id: string) {
+    await new Promise<void>(resolve=>this.app.workspace.onLayoutReady(resolve));
+    let leaf=this.app.workspace.getLeavesOfType(CHANGESET_VIEW).find(leaf=>(leaf.view.getState() as {changeset_id?:string}).changeset_id===id);
+    if(!leaf)leaf=this.app.workspace.getLeaf(this.app.workspace.getMostRecentLeaf()?'tab':false);
+    await leaf.setViewState({type:CHANGESET_VIEW,active:true,state:{changeset_id:id}});await this.app.workspace.revealLeaf(leaf);
+    if (leaf.view instanceof ChangeSetView) this.activateChangeSet(leaf.view);
+    await this.openReview(); await this.app.workspace.revealLeaf(leaf);
+  }
+  activateChangeSet(view: ChangeSetView) { this.changeSetFocus = view; this.focusedPath = null; this.refreshViews(); }
+  releaseChangeSet(view: ChangeSetView) { if (this.changeSetFocus === view) { this.changeSetFocus = null; this.refreshViews(); } }
   refreshViews() { for (const leaf of this.app.workspace.getLeavesOfType(VIEW)) if (leaf.view instanceof ReviewView) void leaf.view.refresh(); }
   async openReview() {
     try {
@@ -86,7 +116,7 @@ export default class EngramWeavePlugin extends Plugin {
   async flushEditors() {
     for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
       const view = leaf.view;
-      if (view instanceof MarkdownView && view.file && /^(20_Sources|30_Drafts)\//.test(view.file.path)) await view.save();
+      if (view instanceof MarkdownView && view.file && /^(10_Ideas|20_Sources|30_Drafts|40_Knowledge|50_Research|60_Projects|90_System)\//.test(view.file.path)) await view.save();
     }
   }
   async openFile(relative: string) { await this.app.workspace.openLinkText(relative, '', false); }
@@ -151,6 +181,9 @@ class ReviewView extends ItemView {
   }
   async refresh() {
     if (this.closed || this.operating) return;
+    if (this.plugin.changeSetFocus) {
+      this.epoch++; this.panel.empty(); this.plugin.changeSetFocus.renderControls(this.panel); return;
+    }
     const editing = this.panel.querySelector<HTMLTextAreaElement>('.ew-review-note');
     if (editing && editing.dataset.draft === this.plugin.focusedPath && editing === editing.ownerDocument.activeElement) {
       // Do not replace a live input during polling or file notifications; resume display refresh after focus leaves it.
@@ -260,6 +293,16 @@ class ReviewView extends ItemView {
     renderHumanReview({ notes:this.plugin.notes, review, error:this.plugin.reviewRecoveryError, parent:this.section('Human Review'),
       button:(...args) => this.button(...args), fresh:async () => { await this.plugin.flushEditors(); return this.plugin.workflow.review(draft.path); },
       open:relative => this.plugin.openFile(relative), focused:() => this.plugin.focusedPath });
+    const planning=this.section('Integration Planner');
+    this.button(planning,'Generate ChangeSet',async()=>{
+      await this.plugin.flushEditors();const fresh=await this.plugin.workflow.review(draft.path);
+      if(fresh.human_review?.selected_draft!==draft.path)throw new Error('先 Review Complete，选择这份 Draft。');
+      const response=await this.plugin.workflow.plan(source.path, fresh.source.revision);
+      const job=await this.waitJob<PlannerJob>(response.job.id);if(job.status!=='succeeded'||!job.changeset_id)throw new Error(job.error?.message??'Planner did not finish');
+      if(this.plugin.focusedPath===draft.path)await this.plugin.openChangeSet(job.changeset_id);
+    },source.kind!=='source'||source.processing_status!=='reviewed'||review.human_review?.selected_draft!==draft.path);
+    const proposals=await this.plugin.client.request<{items:ChangeSet[]}>(`/v1/changesets?source_path=${encodeURIComponent(source.path)}`);
+    if(this.plugin.focusedPath!==draft.path)return;for(const proposal of proposals.items)this.button(planning,'Open ChangeSet',()=>this.plugin.openChangeSet(proposal.id));
     const publish = this.section('MVP · Publish to Knowledge');
     publish.createEl('p', { text: '修改和核对正文后，新建一份 Knowledge；保留 Source 和全部 Draft 文件，成功后 Source Archived、相关 Draft Discarded。', cls: 'ew-muted' });
     if (review.publication) {
@@ -311,10 +354,10 @@ class ReviewView extends ItemView {
     const timer = window.setTimeout(() => { this.polling = false; if (!this.closed) void this.refresh(); }, 2000);
     this.register(() => window.clearTimeout(timer));
   }
-  private async waitJob<T extends CompilerJob | AnalyzerJob | Job>(id: string): Promise<T> {
+  private async waitJob<T extends CompilerJob | AnalyzerJob | Job | PlannerJob>(id: string): Promise<T> {
     while (!this.closed) {
       const job = await this.plugin.client.request<T>(`/v1/jobs/${encodeURIComponent(id)}`);
-      this.feedback.setText(`${job.kind === 'compile_source' ? 'Compiler' : job.kind === 'scan_vault' ? 'Refresh Workspace' : 'Draft Analyzer'} · ${job.status}`);
+      this.feedback.setText(`${job.kind === 'compile_source' ? 'Compiler' : job.kind === 'scan_vault' ? 'Refresh Workspace' : job.kind === 'plan_integration' ? 'Integration Planner' : 'Draft Analyzer'} · ${job.status}`);
       if (finished(job.status)) return job;
       await new Promise(resolve => window.setTimeout(resolve, 1000));
     }
@@ -359,4 +402,10 @@ class PublishModal extends Modal {
       }));
   }
   onClose() { this.contentEl.empty(); }
+}
+
+class ChangeSetPicker extends Modal {
+  constructor(private readonly plugin:EngramWeavePlugin){super(plugin.app);}
+  async onOpen(){this.contentEl.createEl('h2',{text:'ChangeSet candidates'});try{const result=await this.plugin.client.request<{items:ChangeSet[]}>('/v1/changesets');if(!result.items.length)this.contentEl.createEl('p',{text:'尚无已生成方案。先 Review Complete，再执行 Integration Planner。'});for(const item of result.items){const button=this.contentEl.createEl('button',{text:item.source_path});button.onclick=()=>{this.close();void this.plugin.openChangeSet(item.id);};}}catch(error){this.contentEl.createEl('p',{text:message(error)});}}
+  onClose(){this.contentEl.empty();}
 }

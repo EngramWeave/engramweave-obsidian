@@ -37,5 +37,11 @@ export class Workflow {
   recompile(request: RecompileRequest) {return this.client.request<RecompileResponse>('/v1/recompile',request);}
   humanReview(request: HumanReviewRequest, vault: string) { return this.client.request<HumanReviewResponse>('/v1/human-review', request, vault); }
   reviewAction(id: string, vault: string) { return this.client.request<ReviewActionReceipt>(`/v1/review-action?id=${encodeURIComponent(id)}`, undefined, vault); }
+  private planRequest: {request_id:string;source_path:string;source_revision:string}|null=null;
+  async plan(source: string, revision: string) {
+    if(this.planRequest?.source_path!==source)this.planRequest=null;
+    this.planRequest??={request_id:randomUUID(),source_path:source,source_revision:revision};
+    const result=await this.client.request<{job:import('@engramweave/contracts').PlannerJob;reused:boolean}>('/v1/plans',this.planRequest);this.planRequest=null;return result;
+  }
   publish(request: PublishDraftRequest) { return this.client.request<PublishDraftResponse>('/v1/draft-publications', request); }
 }
