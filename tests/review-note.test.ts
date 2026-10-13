@@ -53,3 +53,13 @@ it('refuses wrong Vault recovery, empty Idea, oversized notes and mismatching re
  f.request.mockResolvedValueOnce({status:'unfinished',request:{...record.request,note:'Other'},result:null} as never);await expect(f.notes.check(review().draft.path)).rejects.toThrow('does not match');expect(f.records()).toHaveLength(1);
  const other=new ReviewNotes({request:f.request} as unknown as CoreClient,'D:\\Other',f.store);await expect(other.initialize()).rejects.toThrow('another Vault');expect(f.records()[0]!.request).toEqual(record.request);
 });
+
+it('retains the exact confirmed sibling list through uncertain delivery and retries without widening cleanup',async()=>{
+ const f=fixture();const siblings=[{path:'30_Drafts/sibling.md',revision:'c'.repeat(64)}];
+ f.request.mockRejectedValueOnce(new Error('Lost response'));
+ await expect(f.notes.submit('complete',review(),siblings)).rejects.toThrow('Lost response');
+ const original=f.records()[0]!.request as HumanReviewRequest;expect(original.discard_drafts).toEqual(siblings);
+ siblings[0]!.revision='d'.repeat(64);expect(original.discard_drafts![0]!.revision).toBe('c'.repeat(64));
+ const restarted=f.create();await restarted.initialize();await restarted.retry(review().draft.path);
+ expect(f.request.mock.calls[1]![1]).toEqual(original);expect(f.records()).toEqual([]);
+});

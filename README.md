@@ -73,3 +73,5 @@ Human Review 检查：分别输入 Idea、反馈、Intent，核对各自去向�
 侧栏决定每个条目的纳入／拒绝，并查看目录和 discarded 提案的只读 Current。AI 理由与证据在人工编辑后仅作参考。**审查批准清单** 会保存全部脏候选，再以 **Approve & Apply** 一次批准立即执行；至少纳入一项正文，所需新领域须明确授权。Current 刷新后应自行把新增内容合入 Candidate，批准不会使用规划时的旧版本作为目标条件。
 
 未批准时 **打回重新规划** 清理候选和未保存编辑，再按当前 Draft、Intent 与知识库启动新规划。已接受请求只能查明或以原 ID 恢复，不允许取消／换 ID 绕过。送达不明输入暂存于 Vault 外，重开不会自动重投。完成后 Source 仅变为 archived，相关 Draft 仅标记 discarded，保留正文／Intent；消费的工作区清理，重开显示结果。快捷 Publish 使用同一执行和归档保障，仍无需 Planner 或第二次批准。完整合同与备份范围见 [Planner](../engramweave/docs/planning.md)。
+
+Review Complete 在有其他 active 同 Source 稿件时默认提示整理清单，可保留其他稿件；只标记生命周期、不删正文，Core 统一接受与恢复，不误撤销本次选择。单次最多 100 份，不自动截断。Desktop 的 Review / Changes 提供实际文件管理入口，正文审阅与最终批准仍在插件。Desktop 候选预览链接核实 Vault 和方案条目后打开原生 Markdown 阅读模式。详见 [Human Review 合同](../engramweave/docs/human-review.md) 和 [Desktop](../engramweave/docs/desktop.md)。

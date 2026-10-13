@@ -55,7 +55,7 @@ export default class EngramWeavePlugin extends Plugin {
       if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(params.changeset_id??'')||vaultKey(params.vault_path??'')!==vaultKey(vault)){
         new Notice('ChangeSet 链接不属于当前 Vault。');return;
       }
-      void this.openChangeSet(params.changeset_id!).catch(error=>new Notice(message(error)));
+      void (params.preview_item ? this.previewCandidate(params.changeset_id!,params.preview_item) : this.openChangeSet(params.changeset_id!)).catch(error=>new Notice(message(error)));
     });
     this.addCommand({id:'open-changeset',name:'Open ChangeSet candidates',callback:()=>{new ChangeSetPicker(this).open();}});
     this.registerView(VIEW, leaf => new ReviewView(leaf, this));
@@ -98,6 +98,14 @@ export default class EngramWeavePlugin extends Plugin {
     await leaf.setViewState({type:CHANGESET_VIEW,active:true,state:{changeset_id:id}});await this.app.workspace.revealLeaf(leaf);
     if (leaf.view instanceof ChangeSetView) this.activateChangeSet(leaf.view);
     await this.openReview(); await this.app.workspace.revealLeaf(leaf);
+  }
+  async previewCandidate(id: string, item: string) {
+    if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(item))throw new Error('Invalid candidate item');
+    const document=await this.client.request<import('@engramweave/contracts').CandidateDocument>(`/v1/changeset/candidate?id=${encodeURIComponent(id)}&item_id=${encodeURIComponent(item)}`);
+    const relative=document.item.candidate_path;
+    if(!relative?.startsWith(`70_ChangeSets/${id}/candidates/`))throw new Error('Candidate path does not belong to this ChangeSet');
+    const file=this.app.vault.getFileByPath(relative);if(!file)throw new Error('Candidate Markdown is missing');
+    const leaf=this.app.workspace.getLeaf('tab');await leaf.openFile(file,{state:{mode:'preview'}});await this.app.workspace.revealLeaf(leaf);
   }
   activateChangeSet(view: ChangeSetView) { this.changeSetFocus = view; this.focusedPath = null; this.refreshViews(); }
   releaseChangeSet(view: ChangeSetView) { if (this.changeSetFocus === view) { this.changeSetFocus = null; this.refreshViews(); } }
@@ -290,7 +298,7 @@ class ReviewView extends ItemView {
       } catch (error) { tasks.createEl('p', { text: message(error), cls: 'ew-muted' }); }
       if (!finished(analysis.status)) this.pollDisplay();
     }
-    renderHumanReview({ notes:this.plugin.notes, review, error:this.plugin.reviewRecoveryError, parent:this.section('Human Review'),
+    renderHumanReview({ app:this.app, notes:this.plugin.notes, review, error:this.plugin.reviewRecoveryError, parent:this.section('Human Review'),
       button:(...args) => this.button(...args), fresh:async () => { await this.plugin.flushEditors(); return this.plugin.workflow.review(draft.path); },
       open:relative => this.plugin.openFile(relative), focused:() => this.plugin.focusedPath });
     const planning=this.section('Integration Planner');

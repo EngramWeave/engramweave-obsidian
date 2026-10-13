@@ -28,3 +28,6 @@
 .ew-changeset-controls p { margin: 0; overflow-wrap: anywhere; }
 .ew-changeset-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .ew-changeset-actions button { white-space: normal; }
+
+.ew-cleanup-list { max-height: 38vh; overflow: auto; padding-inline-start: 24px; }
+.ew-cleanup-list li { margin-block: 10px; overflow-wrap: anywhere; }

@@ -1,9 +1,10 @@
 import type { DraftReview, HumanReviewResponse } from '@engramweave/contracts';
-import { Notice } from 'obsidian';
+import { Notice, type App } from 'obsidian';
+import { confirmReviewCleanup } from './review-cleanup';
 import type { NoteAction, ReviewNotes } from './review-note';
 
 interface Host {
-  notes: ReviewNotes; review: DraftReview; error: string | null;
+  app: App; notes: ReviewNotes; review: DraftReview; error: string | null;
   parent: HTMLElement;
   button(parent: HTMLElement, label: string, action: () => Promise<unknown>, disabled?: boolean): HTMLButtonElement;
   fresh(): Promise<DraftReview>;
@@ -26,7 +27,21 @@ export function renderHumanReview(host: Host) {
   const active=draft.lifecycle_status==='active' && source.kind==='source' && source.lifecycle_status==='active';
   const disabled=Boolean(host.error||pending||analysis && ['queued','running'].includes(analysis.status));
   const execute=async(action:NoteAction)=>{
-    const fresh=await host.fresh();const result=await notes.submit(action,fresh);
+    let fresh=await host.fresh();let cleanup:{path:string;revision:string}[]|undefined;
+    if(action==='complete') {
+      const others=fresh.related_drafts.filter(item=>item.path.toLowerCase()!==fresh.draft.path.toLowerCase());
+      if(others.length) {
+        const discard=await confirmReviewCleanup(host.app,fresh.draft.title,others);
+        if(discard===null)return;
+        if(discard)cleanup=others.map(({path,revision})=>({path,revision}));
+        fresh=await host.fresh();
+        if(cleanup) {
+          const current=fresh.related_drafts.filter(item=>item.path.toLowerCase()!==fresh.draft.path.toLowerCase());
+          if(current.length!==cleanup.length || current.some(item=>!cleanup!.some(target=>target.path===item.path&&target.revision===item.revision)))throw new Error('Other Drafts changed while confirming. Review Complete again to inspect the current cleanup list.');
+        }
+      }
+    }
+    const result=await notes.submit(action,fresh,cleanup);
     new Notice(action==='complete'?'Review Complete · 等待 Integration Planner':action==='cancel'?'Review Complete cancelled':action==='recompile'?'Recompile requested · Pending':'Idea created');
     if(action==='idea' && (result as HumanReviewResponse).idea_path && host.focused()===draft.path)await host.open((result as HumanReviewResponse).idea_path!);
   };

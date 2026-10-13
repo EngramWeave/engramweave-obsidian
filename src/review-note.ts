@@ -35,7 +35,7 @@ export class ReviewNotes {
     for (const record of records) this.pending.set(record.request.draft_path, record);
   }
   private persist() { return this.store.write([...this.pending.values()]); }
-  async submit(action: NoteAction, review: DraftReview) {
+  async submit(action: NoteAction, review: DraftReview, discardDrafts?: { path: string; revision: string }[]) {
     if (this.pending.has(review.draft.path)) throw new Error('Check or retry the original pending action before submitting another');
     if (this.working) throw new Error('A Review Note action is being saved');
     if (this.pending.size >= 32) throw new Error('Resolve pending Review actions before adding more');
@@ -43,7 +43,8 @@ export class ReviewNotes {
     try {
       const entry = this.notes.get(review.draft.path) ?? { text:'',version:0 };
       const identity = { request_id: randomUUID(), source_path: review.source.path, source_revision: review.source.revision, draft_path: review.draft.path, draft_revision: review.draft.revision };
-      const request = action === 'recompile' ? { ...identity, feedback: entry.text } : { ...identity, action, note: action === 'cancel' ? '' : entry.text };
+      if (discardDrafts !== undefined && action !== 'complete') throw new Error('Sibling cleanup belongs only to Review Complete');
+      const request = action === 'recompile' ? { ...identity, feedback: entry.text } : { ...identity, action, note: action === 'cancel' ? '' : entry.text, ...(discardDrafts?.length ? { discard_drafts: discardDrafts.map(item => ({ ...item })) } : {}) };
       if (action === 'idea' && !entry.text.trim()) throw new Error('Create Idea requires nonempty input');
       if (action !== 'cancel' && entry.text.length > 8000) throw new Error('Review Note exceeds 8000 characters; shorten it before submitting');
       const record: PendingReview = { vault:this.vault,action,request };
